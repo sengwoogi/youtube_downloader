@@ -1,51 +1,106 @@
+import yt_dlp
 import os
-from pytube import YouTube
-from pytube.exceptions import VideoUnavailable, RegexMatchError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def download_media(youtube_url, download_format):
-    """
-    Downloads a video or audio from YouTube.
+def progress_hook(d):
+    if d['status'] == 'downloading':
+        total = d.get('total_bytes') or d.get('total_bytes_estimate')
+        downloaded = d.get('downloaded_bytes', 0)
+        if total:
+            percent = downloaded / total * 100
+            bar_len = 30
+            filled_len = int(bar_len * percent // 100)
+            bar = '█' * filled_len + '-' * (bar_len - filled_len)
+            print(f"\r[Download] |{bar}| {percent:5.1f}%", end='')
+    elif d['status'] == 'finished':
+        print("\r[Download] |██████████████████████████████| 100.0% Done!")
 
-    Args:
-        youtube_url (str): The URL of the YouTube video.
-        download_format (str): The format to download, either 'mp4' or 'mp3'.
-    """
+def download_video(url, ydl_opts):
     try:
-        yt = YouTube(youtube_url, cookies_path="cookies.txt")
-
-        if download_format == 'mp4':
-            stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
-            if stream:
-                stream.download()
-                print(f"Successfully downloaded: {stream.default_filename}")
-            else:
-                print("No suitable mp4 stream found.")
-        elif download_format == 'mp3':
-            stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
-            if stream:
-                outfile = stream.download()
-                base, ext = os.path.splitext(outfile)
-                new_file = base + '.mp3'
-                os.rename(outfile, new_file)
-                print(f"Successfully downloaded and converted to mp3: {new_file}")
-            else:
-                print("No suitable audio stream found.")
-        else:
-            print("Invalid download format. Please choose 'mp4' or 'mp3'.")
-
-    except VideoUnavailable:
-        print(f"Error: Video {youtube_url} is unavailable.")
-    except RegexMatchError:
-        print(f"Error: Could not parse YouTube URL: {youtube_url}. Please check the URL.")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            print("\nTitle:", info.get('title', 'No Title'))
+            print("Views:", info.get('view_count', 'Unknown'))
+            print("Duration:", info.get('duration', 'Unknown'), "seconds")
+            print("\nDownloading...")
+            ydl.download([url])
+        print("\nDownload completed!")
+        print("Saved to:", os.getcwd())
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+        print("\nAn error occurred:", str(e))
 
-if __name__ == '__main__':
-    import argparse
+def main():
+    url = input("Enter YouTube video URL: ")
+    print("Select the format to download:")
+    print("1. mp4 (video)")
+    print("2. mp3 (audio)")
+    fmt_choice = input("Enter the number (1 or 2): ")
 
-    parser = argparse.ArgumentParser(description="Download YouTube videos.")
-    parser.add_argument("--url", required=True, help="YouTube video URL")
-    parser.add_argument("--format", required=True, choices=['mp3', 'mp4'], help="Download format ('mp3' or 'mp4')")
-    args = parser.parse_args()
+    print("\nConverting, please wait...")
 
-    download_media(args.url, args.format)
+    # 병렬 fragment 다운로드 수
+    concurrent_fragments = 16
+
+    ydl_base_opts = {
+        'quiet': True,  # 불필요한 출력 억제
+        'no_warnings': True,
+        'progress_hooks': [progress_hook],
+    }
+
+    if fmt_choice == '1':
+        ydl_opts = {
+            **ydl_base_opts,
+            'format': 'bestvideo+bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s',
+            'merge_output_format': 'mp4',
+            'concurrent_fragment_downloads': concurrent_fragments,
+            'retries': 10,
+            'fragment_retries': 10,
+            'socket_timeout': 30,
+        }
+        file_type = 'mp4'
+    elif fmt_choice == '2':
+        ydl_opts = {
+            **ydl_base_opts,
+            'format': 'bestaudio/best',
+            'outtmpl': '%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'concurrent_fragment_downloads': concurrent_fragments,
+            'retries': 10,
+            'fragment_retries': 10,
+            'socket_timeout': 30,
+        }
+        file_type = 'mp3'
+    else:
+        print("Invalid input. Exiting program.")
+        return
+
+    # 플레이리스트 여부 확인
+    try:
+        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if 'entries' in info:
+                # 플레이리스트: 여러 영상 병렬 다운로드
+                entries = list(info['entries'])
+                print(f"Playlist detected: {len(entries)} videos, downloading up to 4 in parallel.")
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = [executor.submit(download_video, entry['webpage_url'], ydl_opts) for entry in entries]
+                    for f in as_completed(futures):
+                        pass
+            else:
+                # 단일 영상
+                download_video(url, ydl_opts)
+    except Exception as e:
+        print("\nAn error occurred:", str(e))
+        print("\nPlease check the following:")
+        print("1. The URL is correct")
+        print("2. The video is not private")
+        print("3. Your internet connection is stable")
+        print("4. The video does not have age restrictions")
+
+if __name__ == "__main__":
+    main()
