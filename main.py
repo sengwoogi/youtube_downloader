@@ -11,7 +11,7 @@ def download_media(youtube_url, download_format):
         download_format (str): The format to download, either 'mp4' or 'mp3'.
     """
     try:
-        yt = YouTube(youtube_url)
+        yt = YouTube(youtube_url, cookies_path="cookies.txt")
 
         if download_format == 'mp4':
             stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
@@ -41,13 +41,11 @@ def download_media(youtube_url, download_format):
         print(f"An unexpected error occurred: {e}")
 
 if __name__ == '__main__':
-    youtube_url = input("Enter the YouTube video URL: ")
+    import argparse
 
-    while True:
-        download_format = input("Choose download format ('mp3' or 'mp4'): ").lower()
-        if download_format in ['mp3', 'mp4']:
-            break
-        else:
-            print("Invalid format. Please enter 'mp3' or 'mp4'.")
+    parser = argparse.ArgumentParser(description="Download YouTube videos.")
+    parser.add_argument("--url", required=True, help="YouTube video URL")
+    parser.add_argument("--format", required=True, choices=['mp3', 'mp4'], help="Download format ('mp3' or 'mp4')")
+    args = parser.parse_args()
 
-    download_media(youtube_url, download_format)
+    download_media(args.url, args.format)
