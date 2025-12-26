@@ -45,6 +45,7 @@ def main():
         'quiet': True,  # 불필요한 출력 억제
         'no_warnings': True,
         'progress_hooks': [progress_hook],
+        'ignoreerrors': True,  # Workaround for persistent 403 errors
     }
 
     if fmt_choice == '1':
@@ -81,7 +82,7 @@ def main():
 
     # 플레이리스트 여부 확인
     try:
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             if 'entries' in info:
                 # 플레이리스트: 여러 영상 병렬 다운로드
